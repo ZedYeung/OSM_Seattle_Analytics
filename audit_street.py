@@ -1,4 +1,4 @@
-
+"""Audit street."""
 import xml.etree.cElementTree as ET
 from collections import defaultdict
 import re
@@ -11,13 +11,21 @@ directions = street_complete.directions
 
 
 def audit_street_type(st_types, dir_types, street_name):
-    st_split =  street_name.split()
+    """Audit street type.
+
+    Args:
+        st_types: dict that store {street types: (street name set)}.
+        dir_types: dict that store {direction types: (street name set)}.
+        street_name: street name.
+    """
+    st_split = street_name.split()
     # Find the diretion neither first nor last
     for i in st_split[1:-1]:
         if i in directions or i in directions.values():
             print('direction {0}, position {1}'.format(i, st_split.index(i)))
 
-    # Find the unknown street type and direction type that not in road_types and directions
+    # Find the unknown street type and direction type that not in road_types
+    # and directions, then add all street names associated with that type.
     if st_split[-1] in directions or st_split[-1] in directions.values():
         street_type = st_split[-2]
         direction_type = st_split[-1]
@@ -30,8 +38,32 @@ def audit_street_type(st_types, dir_types, street_name):
         dir_types[direction_type].add(street_name)
 
 
+def audit(osmfile):
+    """Audit street in osm file.
+
+    Returns:
+        st_types: dict that store {street types: (street name set)}.
+        dir_types: dict that store {direction types: (street name set)}.
+
+    """
+    st_types = defaultdict(set)
+    dir_types = defaultdict(set)
+
+    with open(osmfile) as osmf:
+        for event, element in ET.iterparse(osmf, events=("start",)):
+            for tag in element.iter("tag"):
+                if tag.get('k') == "addr:street":
+                    audit_street_type(st_types, dir_types, tag.get('v'))
+
+    return st_types, dir_types
+
+
 def update_street(street_name):
-    st_split =  street_name.split()
+    """Return more completed street name."""
+    if isinstance(street_name, list):
+        street_name = [update_street(i) for i in street_name]
+        return street_name
+    st_split = street_name.split()
     if st_split[-1] in directions or st_split[-1] in directions.values():
         street_type = st_split[-2]
         direction_type = st_split[-1]
@@ -49,19 +81,8 @@ def update_street(street_name):
     return ' '.join(st_split)
 
 
-def audit(osmfile):
-    osm_file = open(osmfile, "r")
-    st_types = defaultdict(set)
-    dir_types = defaultdict(set)
-    for event, element in ET.iterparse(osm_file, events=("start",)):
-        for tag in element.iter("tag"):
-            if tag.get('k') == "addr:street":
-                audit_street_type(st_types, dir_types, tag.get('v'))
-    osm_file.close()
-    return st_types, dir_types
-
-
-def main(osmfile):
+def test(osmfile):
+    """Test all function difine above."""
     st_types, dir_types = audit(osmfile)
     pprint.pprint(st_types)
     pprint.pprint(dir_types)
@@ -72,5 +93,6 @@ def main(osmfile):
                     update_name = update_street(tag.get('v'))
                     print(update_name)
 
+
 if __name__ == '__main__':
-    main(SAMPLE)
+    test(SAMPLE)

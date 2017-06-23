@@ -1,3 +1,5 @@
+"""Category k value according to the numbers of colon."""
+
 multi_colon_k = [
     'access:lanes:backward',
     'access:lanes:forward',
