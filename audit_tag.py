@@ -8,6 +8,7 @@ Example:
 """
 import re
 from audit_street import update_street
+from audit_phone import update_phone_number
 
 split_pattern = re.compile(r';|(\|)\1*')
 
@@ -63,6 +64,8 @@ def update_tag(tag, node):
     if ':' not in key:
         if key == 'addr' or key == 'address':
             node['address']['address'] = value
+        elif key == "phone":
+            node[key] = update_phone_number(value)
         else:
             node[key] = value
 
@@ -74,6 +77,9 @@ def update_tag(tag, node):
                 if key2 == 'street':
                     value = update_street(value)
                 node['address'][key2] = value
+            elif key1 == 'contact':
+                if key2 == 'phone':
+                    node[key1][key2] = update_phone_number(value)
             # node[key1] maybe assigned as string before,
             # so we change it to a nested dict.
             elif isinstance(node[key1], str) or isinstance(node[key1], list) \

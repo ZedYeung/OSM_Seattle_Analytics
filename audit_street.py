@@ -6,6 +6,9 @@ import pprint
 import street_complete
 
 SAMPLE = 'Seattle_sample1.osm'
+SAMPLE10 = "Seattle_sample10.osm"
+FILE = "Seattle.osm"
+
 road_types = street_complete.road_types
 directions = street_complete.directions
 
