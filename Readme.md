@@ -5,6 +5,57 @@ Seattle, WA, USA
  ![Mapzen_custom_extract.png](./Mapzen_custom_extract.png)
 
 # Problems Encountered in the Map and Corresponding Corrections
+* Over­abbreviated street names (*"S Estelle St"*)
+* Inconsistent phone number (*"206-623-4727", "+1 206 405-3560", "(206) 293-6302"*)
+* Inconsistent "k" tag with different number of ":" (*'k="amenity"', 'k="addr:street"', 'k="access:lanes:backward"'*)
+* Other problems encountered during importing data
+
+#### Over­abbreviated street names
+Use abbreviated mapping completed street types dict(*'Ave': 'Avenue'*) and abbreviated mapping completed directions dict(*'S': 'South'*) to make the over­abbreviated street names more completed.
+```
+def update_street(street_name):
+    """Return more completed street name."""
+    if isinstance(street_name, list):
+        street_name = [update_street(i) for i in street_name]
+        return street_name
+    st_split = street_name.split()
+    if st_split[-1] in directions or st_split[-1] in directions.values():
+        street_type = st_split[-2]
+        direction_type = st_split[-1]
+        if road_types.get(street_type):
+            st_split[-2] = road_types.get(street_type)
+        if directions.get(direction_type):
+            st_split[-1] = directions.get(direction_type)
+    else:
+        street_type = st_split[-1]
+        direction_type = st_split[0]
+        if road_types.get(street_type):
+            st_split[-1] = road_types.get(street_type)
+        if directions.get(direction_type):
+            st_split[0] = directions.get(direction_type)
+    return ' '.join(st_split)
+```
+
+#### Inconsistent phone number
+Transform the phone number mainly into format "+1 206-XXX-XXXX" or other toll-free number format like "+1 888-XXX-XXXX" and "911".
+```
+def update_phone_number(phone):
+    """Return formatted phone number."""
+    phone_num = re.sub('\D', '', phone)
+    if phone_num == '' or phone_num == "911":
+        pass
+    elif phone_num.startswith('1'):
+        phone_num = '+1 ' + phone_num[1:4] + '-' + \
+            phone_num[4:7] + '-' + phone_num[7:11]
+    elif phone_num.startswith('001'):
+        phone_num = '+1 ' + phone_num[3:6] + '-' + \
+            phone_num[6:9] + '-' + phone_num[9:13]
+    else:
+        phone_num = "+1 " + phone_num[0:3] + '-' + \
+            phone_num[3:6] + '-' + phone_num[6:10]
+    return phone_num
+```
+#### Inconsistent "k" tag with different number of ":"
 For example
 ```
 <node changeset="44226942" id="1725980819" lat="47.662684" lon="-122.2997452" timestamp="2016-12-07T06:25:19Z" uid="2601744" user="sctrojan79" version="4">
@@ -459,13 +510,116 @@ $ mongoimport -d osm -c Seattle --file Seattle.osm.json
 { "_id" : "christian", "count" : 422 }
 ```
 # Additional Ideas
+
+#### Contributor statistics
 An additional way to analyze the data would be to take a look at when and how many time the data have been created or modified.  
 As time progresses, in addition to adding on previously missing nodes, ways, and relations,
 it is important to update old entries to reflect changes in the real world.   
 At first, I grouped the "created.version" and found the version 1 have accounted for 91.4%.  
 Then, I grouped the entries by year and found the 2013 have accounted for 76.1%.  
 Finally, I grouped the entries by year and version. As expected, the 2013 version 1 have accounted for 74.5%.  
-In conclusion, most data are created in 2013 and never been modified from then on.
+In conclusion, most data are created in 2013 and never been modified from then on. Therefore, maybe time to renovate the data since our real world already changed beyond recognition.
+
+#### Cross-validation
+Use Google map api to cross-validate open street map data(phone, postal code and street address).
+The data set is 400: 1 sample because the request quota of Google Places API Web Service is only 1000 per day.
+```
+def cross_validate(osmfile):
+    """Cross-validating phone, postal code and street address.
+
+    Respectively count the total number of phone, postal code and street
+    address in OSM and number of these different itmes in OSM and googlemaps.
+    """
+    google_address = ''
+    osm_address_street = ''
+    phone_count = 0
+    phone_diff_count = 0
+    postal_code_count = 0
+    postal_code_diff_count = 0
+    address_count = 0
+    address_diff_count = 0
+
+    with open(osmfile, "r") as osmf:
+        for event, element in ET.iterparse(osmf, events=("start",)):
+            if element.tag == "node":
+                for tag in element.iter("tag"):
+                    key = tag.get('k')
+                    if key == "phone" or key == "contact:phone":
+                        phone_count += 1
+                        place = get_place(element)
+                        phone_number = place.get('international_phone_number')
+                        if phone_number:
+                            osm_phone = update_phone_number(tag.get('v'))
+                            if phone_number != osm_phone:
+                                phone_diff_count += 1
+                                print((phone_number, osm_phone))
+
+                    if key == "postal_code" or key == "addr:postcode":
+                        postal_code_count += 1
+                        place = get_place(element)
+                        formatted_address = place.get('formatted_address')
+                        if formatted_address:
+                            postal_code = formatted_address[-10:-5]
+                            osm_postal_code = tag.get('v')
+                            if postal_code != osm_postal_code:
+                                postal_code_diff_count += 1
+                                print((postal_code, osm_postal_code))
+
+                    if key == "addr:street":
+                        address_count += 1
+                        place = get_place(element)
+                        address = place.get('name')
+                        street_list = address.split()[1:]
+                        street = ' '.join(street_list)
+                        if len(street_list) > 1:
+                            google_address_street = update_street(street)
+                        else:
+                            google_address_street = street
+                        google_address_number = address.split()[0]
+                        google_address = google_address_number + ' ' \
+                            + google_address_street
+                        osm_address_street = update_street(tag.get('v'))
+                    if key == "addr:housenumber":
+                        osm_address_number = tag.get('v').split()[0]
+                        osm_address = osm_address_number + ' ' \
+                            + osm_address_street
+                        if google_address != osm_address:
+                            address_diff_count += 1
+                            print((google_address, osm_address))
+
+    print(phone_count)
+    print(phone_diff_count)
+    print(postal_code_count)
+    print(postal_code_diff_count)
+    print(address_count)
+    print(address_diff_count)
+```
+Part of the results
+```
+('134 5th Avenue West', '141 7th Avenue West')
+('9637 Northeast 121st Lane', '12044 96th Avenue Northeast')
+('9711 Northeast 120th Place', '9742 Northeast 119th Way')
+('11803 100th Avenue Northeast', '11807 100th Avenue Northeast')
+('514 Lake Street South', '515 Lake Street South')
+('5569 Lake Washington Boulevard Northeast', '5535 Lake Washington Boulevard Northeast')
+('98011', '98034')
+('14199 74th Place Northeast', '14146 73rd Place Northeast')
+('13215 97th Avenue Northeast', '13217 97th Avenue Northeast')
+3
+0
+166
+1
+167
+98
+```
+* Benefits
+ 1. Can use Google map data to correct incorrect data or fill missing data.
+ 2. Can check the OSM data accuracy(nearly half of the OSM address data are Inconsistent with Google map data)
+* Anticipated Issues
+ 1. The request quota of Google Places API Web Service is only 1000 per day, while there are 2723908 documents.
+ 2. Google map data miss phone number while OSM data have.
+ 3. Most of the differences between inconsistent address data are single figures. I cannot see which data set is more reliable.
+
 #### Top 10 appearing data created version
 ```
 > db.Seattle.aggregate([
@@ -540,4 +694,4 @@ In conclusion, most data are created in 2013 and never been modified from then o
 1210 Lakeview Blvd E, Seattle, WA 98102, USA
 
 # Conclusion
-After this review of the Seattle open street map data set, I found the data quality is high but tag is a little bit messed. I believe the data set has been well cleaned for the purposes of further data mining. I already do some data query by mongodb as example.
+After this review of the Seattle open street map data set, I found nearly half of the address data are inconsistent with Google map data and tag is a little bit messed. I think use Google map data to renovate OSM data is a good idea but unavailable since there is quota on Google Map API. I already do some data query by mongodb as example.
